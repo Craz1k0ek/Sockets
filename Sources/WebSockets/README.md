@@ -10,3 +10,18 @@ let websocket = WebSocket(url: serverURL)
 try await websocket.connect()
 try await websocket.disconnect()
 ```
+
+### Send
+
+```swift
+let websocket: WebSocket ...
+
+// Text message
+try await websocket.send("Hello World!")
+
+// Binary message
+let image: UIImage ...
+if let imageBytes = image.pngData() {
+    try await websocket.send(imageBytes)
+}
+```

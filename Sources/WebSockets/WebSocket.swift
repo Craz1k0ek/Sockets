@@ -108,6 +108,25 @@ open class WebSocket: NSObject, ObservableObject {
         }
     }
 
+    /// Send a websocket message over the websocket.
+    /// - Parameter message: The message to send over the websocket.
+    private final func send(_ message: URLSessionWebSocketTask.Message) async throws {
+        guard let task else { throw URLError(.cancelled) }
+        try await task.send(message)
+    }
+
+    /// Send a textual message to the websocket.
+    /// - Parameter text: The message to send over the websocket.
+    open func send(_ text: String) async throws {
+        try await send(.string(text))
+    }
+
+    /// Send a binary message to the websocket.
+    /// - Parameter data: The message to send over the websocket.
+    open func send(_ data: Data) async throws {
+        try await send(.data(data))
+    }
+
     /// Handle errors and cancel tasks when one occured.
     /// - Parameter error: The optional error that occured.
     private final func handleError(_ error: Error?) {
@@ -119,7 +138,7 @@ open class WebSocket: NSObject, ObservableObject {
         if [ECONNRESET, ENOTCONN, ETIMEDOUT].contains(Int32((error as NSError).code)) {
             task?.cancel(with: .abnormalClosure, reason: nil)
         }
-        
+
         task?.cancel()
         task = nil
     }
