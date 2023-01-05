@@ -7,10 +7,10 @@ let package = Package(
     name: "Sockets",
     platforms: [.iOS(.v13)],
     products: [
-        .library(name: "Sockets", targets: ["Sockets"]),
+        .library(name: "WebSockets", targets: ["WebSockets"])
     ],
     targets: [
-        .target(name: "Sockets"),
-        .testTarget(name: "SocketsTests", dependencies: ["Sockets"]),
+        .target(name: "WebSockets"),
+        .testTarget(name: "WebSocketsTests", dependencies: ["WebSockets"])
     ]
 )
