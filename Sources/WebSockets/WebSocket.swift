@@ -68,6 +68,35 @@ open class WebSocket: NSObject, ObservableObject {
         try await connectTask.value
     }
 
+    private var disconnectTask: Task<Void, Error>?
+    private var disconnectContinuation: CheckedContinuation<Void, Error>?
+
+    /// Disconnect the websocket.
+    /// - Parameters:
+    ///   - code: The close code that indicates the reason for closing the connection.
+    ///   - reason: Optional further information to explain the closing. The value of this parameter is defined by the endpoints, not by the standard.
+    open func disconnect(code: URLSessionWebSocketTask.CloseCode = .normalClosure, reason: Data? = nil) async throws {
+        guard let task else { return }
+
+        if let disconnectTask {
+            return try await disconnectTask.value
+        }
+
+        defer {
+            disconnectContinuation = nil
+            disconnectTask = nil
+        }
+
+        let disconnectTask = Task {
+            try await withCheckedThrowingContinuation { continuation in
+                disconnectContinuation = continuation
+                task.cancel(with: code, reason: reason)
+            }
+        }
+        self.disconnectTask = disconnectTask
+        try await disconnectTask.value
+    }
+
     private final func receive() {
         task?.receive() { [receive] response in
             switch response {
@@ -87,9 +116,15 @@ extension WebSocket: URLSessionWebSocketDelegate {
         objectWillChange.send()
     }
 
+    public func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        disconnectContinuation?.resume()
+        objectWillChange.send()
+    }
+
     public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         if let error {
             connectContinuation?.resume(throwing: error)
+            disconnectContinuation?.resume(throwing: error)
         }
         objectWillChange.send()
     }
@@ -97,6 +132,7 @@ extension WebSocket: URLSessionWebSocketDelegate {
     public func urlSession(_ session: URLSession, didBecomeInvalidWithError error: Error?) {
         if let error {
             connectContinuation?.resume(throwing: error)
+            disconnectContinuation?.resume(throwing: error)
         }
         objectWillChange.send()
     }
