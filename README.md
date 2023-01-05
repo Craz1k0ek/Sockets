@@ -1,3 +1,3 @@
 # Sockets
 
-A description of this package.
+This is a Swift imlpementation for websockets.

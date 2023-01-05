@@ -54,10 +54,10 @@ open class WebSocket: NSObject, ObservableObject {
                 try await withCheckedThrowingContinuation { continuation in
                     connectContinuation = continuation
                     if #available(iOS 15, *) {
-                        task = session.webSocketTask(with: url)
+                        task = session.webSocketTask(with: url, protocols: protocols)
                         task?.delegate = self
                     } else {
-                        task = taskSession.webSocketTask(with: url)
+                        task = taskSession.webSocketTask(with: url, protocols: protocols)
                     }
                     receive()
                     task?.resume()
@@ -98,15 +98,30 @@ open class WebSocket: NSObject, ObservableObject {
     }
 
     private final func receive() {
-        task?.receive() { [receive] response in
+        task?.receive() { [handleError, receive] response in
             switch response {
-            case .success(let success):
-                print(success)
+            case .success(let message):
                 receive()
-            case .failure(let failure):
-                print(failure)
+            case .failure(let error):
+                handleError(error)
             }
         }
+    }
+
+    /// Handle errors and cancel tasks when one occured.
+    /// - Parameter error: The optional error that occured.
+    private final func handleError(_ error: Error?) {
+        guard let error else { return }
+
+        connectContinuation?.resume(throwing: error)
+        disconnectContinuation?.resume(throwing: error)
+
+        if [ECONNRESET, ENOTCONN, ETIMEDOUT].contains(Int32((error as NSError).code)) {
+            task?.cancel(with: .abnormalClosure, reason: nil)
+        }
+        
+        task?.cancel()
+        task = nil
     }
 }
 
@@ -118,22 +133,17 @@ extension WebSocket: URLSessionWebSocketDelegate {
 
     public func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         disconnectContinuation?.resume()
+        self.task = nil
         objectWillChange.send()
     }
 
     public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error {
-            connectContinuation?.resume(throwing: error)
-            disconnectContinuation?.resume(throwing: error)
-        }
+        handleError(error)
         objectWillChange.send()
     }
 
     public func urlSession(_ session: URLSession, didBecomeInvalidWithError error: Error?) {
-        if let error {
-            connectContinuation?.resume(throwing: error)
-            disconnectContinuation?.resume(throwing: error)
-        }
+        handleError(error)
         objectWillChange.send()
     }
 }
