@@ -8,9 +8,23 @@ open class WebSocket: NSObject, ObservableObject {
     private let session: URLSession
     /// The session used to create the websocket task.
     @available(iOS, deprecated: 15, message: "Set the URLSessionWebSocketTask.delegate instead of using a custom URLSession instance")
-    private lazy var taskSession = URLSession(configuration: session.configuration, delegate: self, delegateQueue: session.delegateQueue)
+    private lazy var taskSession = URLSession(configuration: session.configuration, delegate: socketDelegate, delegateQueue: session.delegateQueue)
     /// The underlying websocket task.
     private var task: URLSessionWebSocketTask?
+    /// The delegate wrapper of the socket.
+    ///
+    /// This wrapper is required to make sure the `URLSession` does
+    /// correctly release the delegate.
+    private lazy var socketDelegate = WebSocket.Delegate(delegate: self)
+
+    private var messageContinuation: AsyncThrowingStream<URLSessionWebSocketTask.Message, Error>.Continuation?
+    /// Messages received during the lifetime of the websocket.
+    ///
+    /// When the socket is disconnected and connected, all existing messages
+    /// are removed and a new set will be created.
+    private(set) lazy var messages: AsyncThrowingStream<URLSessionWebSocketTask.Message, Error> = .init(URLSessionWebSocketTask.Message.self) { [weak self] continuation in
+        self?.messageContinuation = continuation
+    }
 
     /// Boolean value indicating whether or not the websocket is connected.
     open var isConnected: Bool {
@@ -30,6 +44,9 @@ open class WebSocket: NSObject, ObservableObject {
     deinit {
         task?.cancel(with: .goingAway, reason: nil)
         taskSession.invalidateAndCancel()
+
+        messageContinuation?.finish()
+        messageContinuation = nil
     }
 
     private var connectTask: Task<Void, Error>?
@@ -49,15 +66,24 @@ open class WebSocket: NSObject, ObservableObject {
             self.connectTask = nil
         }
 
+        if let messageContinuation {
+            messageContinuation.finish()
+            self.messageContinuation = nil
+        }
+
+        messages = AsyncThrowingStream { [weak self] continuation in
+            self?.messageContinuation = continuation
+        }
+
         let connectTask = Task {
             if task == nil {
                 try await withCheckedThrowingContinuation { continuation in
                     connectContinuation = continuation
                     if #available(iOS 15, *) {
-                        task = session.webSocketTask(with: url, protocols: protocols)
-                        task?.delegate = self
+                        task = session.webSocketTask(with: url)
+                        task?.delegate = socketDelegate
                     } else {
-                        task = taskSession.webSocketTask(with: url, protocols: protocols)
+                        task = taskSession.webSocketTask(with: url)
                     }
                     receive()
                     task?.resume()
@@ -97,20 +123,22 @@ open class WebSocket: NSObject, ObservableObject {
         try await disconnectTask.value
     }
 
+    /// Receive websocket messages.
     private final func receive() {
-        task?.receive() { [handleError, receive] response in
+        task?.receive() { [weak self] response in
             switch response {
             case .success(let message):
-                receive()
+                self?.messageContinuation?.yield(message)
+                self?.receive()
             case .failure(let error):
-                handleError(error)
+                #warning("Error implementation required")
             }
         }
     }
 
     /// Send a websocket message over the websocket.
     /// - Parameter message: The message to send over the websocket.
-    private final func send(_ message: URLSessionWebSocketTask.Message) async throws {
+    open func send(_ message: URLSessionWebSocketTask.Message) async throws {
         guard let task else { throw URLError(.cancelled) }
         try await task.send(message)
     }
@@ -128,10 +156,8 @@ open class WebSocket: NSObject, ObservableObject {
     }
 
     /// Handle errors and cancel tasks when one occured.
-    /// - Parameter error: The optional error that occured.
-    private final func handleError(_ error: Error?) {
-        guard let error else { return }
-
+    /// - Parameter error: The error that occured.
+    private final func handleError(_ error: Error) {
         connectContinuation?.resume(throwing: error)
         disconnectContinuation?.resume(throwing: error)
 
@@ -141,6 +167,9 @@ open class WebSocket: NSObject, ObservableObject {
 
         task?.cancel()
         task = nil
+
+        messageContinuation?.finish(throwing: error)
+        messageContinuation = nil
     }
 }
 
@@ -152,17 +181,21 @@ extension WebSocket: URLSessionWebSocketDelegate {
 
     public func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         disconnectContinuation?.resume()
-        self.task = nil
         objectWillChange.send()
     }
 
     public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        handleError(error)
-        objectWillChange.send()
-    }
+        defer { objectWillChange.send() }
 
-    public func urlSession(_ session: URLSession, didBecomeInvalidWithError error: Error?) {
-        handleError(error)
-        objectWillChange.send()
+        if let error {
+            return handleError(error)
+        }
+
+        connectContinuation?.resume()
+        disconnectContinuation?.resume()
+        messageContinuation?.finish()
+        messageContinuation = nil
+
+        self.task = nil
     }
 }

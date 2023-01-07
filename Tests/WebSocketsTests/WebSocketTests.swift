@@ -6,7 +6,7 @@ final class SocketsTests: XCTestCase {
 
     override func setUpWithError() throws {
         try super.setUpWithError()
-        let url = try XCTUnwrap(URL(string: "wss://socketsbay.com/wss/v2/1/demo/"))
+        let url = try XCTUnwrap(URL(string: "ws://localhost:8080/socket/test"))
         websocket = WebSocket(url: url)
     }
 
@@ -19,5 +19,16 @@ final class SocketsTests: XCTestCase {
 
         try await websocket.disconnect()
         XCTAssertFalse(websocket.isConnected)
+    }
+
+    func testSessionInvalidation() async throws {
+        try await websocket?.connect()
+        try await websocket?.send("Hello World")
+
+        for try await message in websocket!.messages {
+            if case .string(let text) = message, text.starts(with: "5") {
+                websocket = nil
+            }
+        }
     }
 }
