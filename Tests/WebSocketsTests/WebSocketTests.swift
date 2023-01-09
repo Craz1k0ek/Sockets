@@ -10,6 +10,29 @@ final class SocketsTests: XCTestCase {
         websocket = WebSocket(url: url)
     }
 
+    func testMultipleConnectCalls() async throws {
+        try await websocket.connect()
+        try await websocket.connect()
+        try await websocket.connect()
+    }
+
+    func testConnectDisconnectConnect() async throws {
+        try await websocket.connect()
+        try await websocket.disconnect()
+        try await websocket.connect()
+    }
+
+    func testMultipleDisconnectCalls() async throws {
+        try await websocket.connect()
+        try await websocket.disconnect()
+        try await websocket.disconnect()
+        try await websocket.disconnect()
+    }
+
+    func testDisconnectWithoutConnect() async throws {
+        try await websocket.disconnect()
+    }
+
     func testSocketConnection() async throws {
         try await websocket.connect()
         XCTAssertTrue(websocket.isConnected)
@@ -25,10 +48,13 @@ final class SocketsTests: XCTestCase {
         try await websocket?.connect()
         try await websocket?.send("Hello World")
 
-        for try await message in websocket!.messages {
-            if case .string(let text) = message, text.starts(with: "5") {
-                websocket = nil
+        do {
+            for try await message in websocket!.messages {
+                print(message)
+                if case .string(let text) = message, text.starts(with: "5") {
+                    websocket = nil
+                }
             }
-        }
+        } catch is CancellationError {}
     }
 }

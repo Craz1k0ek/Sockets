@@ -19,17 +19,24 @@ open class WebSocket: NSObject, ObservableObject {
 
     private var messageContinuation: AsyncThrowingStream<URLSessionWebSocketTask.Message, Error>.Continuation?
     /// Messages received during the lifetime of the websocket.
-    ///
-    /// When the socket is disconnected and connected, all existing messages
-    /// are removed and a new set will be created.
     private(set) lazy var messages: AsyncThrowingStream<URLSessionWebSocketTask.Message, Error> = .init(URLSessionWebSocketTask.Message.self) { [weak self] continuation in
         self?.messageContinuation = continuation
     }
 
     /// Boolean value indicating whether or not the websocket is connected.
     open var isConnected: Bool {
-        guard let task else { return false }
-        return task.closeCode == .invalid
+        guard let task else {
+            return false
+        }
+
+        switch task.state {
+        case .canceling, .completed:
+            return false
+        case .running:
+            return true
+        default:
+            return task.closeCode == .invalid
+        }
     }
 
     /// Create the websocket.
@@ -45,8 +52,9 @@ open class WebSocket: NSObject, ObservableObject {
         task?.cancel(with: .goingAway, reason: nil)
         taskSession.invalidateAndCancel()
 
-        messageContinuation?.finish()
-        messageContinuation = nil
+        connectContinuation?.resume(throwing: CancellationError())
+        disconnectContinuation?.resume(throwing: CancellationError())
+        messageContinuation?.finish(throwing: CancellationError())
     }
 
     private var connectTask: Task<Void, Error>?
@@ -61,33 +69,17 @@ open class WebSocket: NSObject, ObservableObject {
             return try await connectTask.value
         }
 
-        defer {
-            self.connectContinuation = nil
-            self.connectTask = nil
-        }
-
-        if let messageContinuation {
-            messageContinuation.finish()
-            self.messageContinuation = nil
-        }
-
-        messages = AsyncThrowingStream { [weak self] continuation in
-            self?.messageContinuation = continuation
-        }
-
         let connectTask = Task {
-            if task == nil {
-                try await withCheckedThrowingContinuation { continuation in
-                    connectContinuation = continuation
-                    if #available(iOS 15, *) {
-                        task = session.webSocketTask(with: url)
-                        task?.delegate = socketDelegate
-                    } else {
-                        task = taskSession.webSocketTask(with: url)
-                    }
-                    receive()
-                    task?.resume()
+            try await withCheckedThrowingContinuation { continuation in
+                connectContinuation = continuation
+                if #available(iOS 15, *) {
+                    task = session.webSocketTask(with: url)
+                    task?.delegate = socketDelegate
+                } else {
+                    task = taskSession.webSocketTask(with: url)
                 }
+                receive()
+                task?.resume()
             }
         }
         self.connectTask = connectTask
@@ -102,15 +94,10 @@ open class WebSocket: NSObject, ObservableObject {
     ///   - code: The close code that indicates the reason for closing the connection.
     ///   - reason: Optional further information to explain the closing. The value of this parameter is defined by the endpoints, not by the standard.
     open func disconnect(code: URLSessionWebSocketTask.CloseCode = .normalClosure, reason: Data? = nil) async throws {
-        guard let task else { return }
+        guard isConnected, let task else { return }
 
         if let disconnectTask {
             return try await disconnectTask.value
-        }
-
-        defer {
-            disconnectContinuation = nil
-            disconnectTask = nil
         }
 
         let disconnectTask = Task {
@@ -131,7 +118,7 @@ open class WebSocket: NSObject, ObservableObject {
                 self?.messageContinuation?.yield(message)
                 self?.receive()
             case .failure(let error):
-                #warning("Error implementation required")
+                self?.handleError(error)
             }
         }
     }
@@ -159,14 +146,12 @@ open class WebSocket: NSObject, ObservableObject {
     /// - Parameter error: The error that occured.
     private final func handleError(_ error: Error) {
         connectContinuation?.resume(throwing: error)
+        connectContinuation = nil
+
         disconnectContinuation?.resume(throwing: error)
+        disconnectContinuation = nil
 
-        if [ECONNRESET, ENOTCONN, ETIMEDOUT].contains(Int32((error as NSError).code)) {
-            task?.cancel(with: .abnormalClosure, reason: nil)
-        }
-
-        task?.cancel()
-        task = nil
+        task?.cancel(with: .abnormalClosure, reason: error.localizedDescription.data(using: .utf8))
 
         messageContinuation?.finish(throwing: error)
         messageContinuation = nil
@@ -176,11 +161,18 @@ open class WebSocket: NSObject, ObservableObject {
 extension WebSocket: URLSessionWebSocketDelegate {
     public func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
         connectContinuation?.resume()
+        connectContinuation = nil
+
         objectWillChange.send()
     }
 
     public func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         disconnectContinuation?.resume()
+        disconnectContinuation = nil
+
+        messageContinuation?.finish()
+        messageContinuation = nil
+
         objectWillChange.send()
     }
 
@@ -192,7 +184,11 @@ extension WebSocket: URLSessionWebSocketDelegate {
         }
 
         connectContinuation?.resume()
+        connectContinuation = nil
+
         disconnectContinuation?.resume()
+        disconnectContinuation = nil
+
         messageContinuation?.finish()
         messageContinuation = nil
 
