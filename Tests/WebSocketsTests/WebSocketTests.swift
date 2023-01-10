@@ -57,4 +57,21 @@ final class SocketsTests: XCTestCase {
             }
         } catch is CancellationError {}
     }
+
+    func testReconnect() async throws {
+        try await websocket.connect()
+        try await websocket.disconnect()
+        XCTAssertFalse(websocket.isConnected)
+
+        let reconnected = try await websocket.reconnect()
+        XCTAssertTrue(reconnected.isConnected)
+        XCTAssertNotEqual(websocket, reconnected)
+    }
+
+    func testReconnectConnected() async throws {
+        try await websocket.connect()
+
+        let reconnected = try await websocket.reconnect()
+        XCTAssertEqual(websocket, reconnected)
+    }
 }

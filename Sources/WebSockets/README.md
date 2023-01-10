@@ -32,6 +32,25 @@ if let imageBytes = image.pngData() {
 }
 ```
 
+### Reconnect
+A socket can be reconnected. Conform spec, this will create a fresh socket, with the same parameters as previously provided.
+
+```swift
+let websocket: WebSocket ...
+
+try await websocket.disconnect()
+let reconnected = try await websocket.reconnect() 
+```
+
+Reconnecting will automatically connect the newly created socket. Calling reconnect on a connected socket will return the current socket, as reconnection is not required.
+
+```swift
+let websocket: WebSocket ...
+
+try await websocket.connect()
+let reconnected = try await websocket.reconnect()   // websocket == reconnected 
+``` 
+
 ### Additional info
 
 **Connecting a disconnected websocket will do nothing. This is similar behaviour to the existing task objects that Apple provides.**

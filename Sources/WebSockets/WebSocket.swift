@@ -142,6 +142,17 @@ open class WebSocket: NSObject, ObservableObject {
         try await send(.data(data))
     }
 
+    /// Reconnect the websocket.
+    /// - Note: Reconnection actually is creating a new websocket.
+    /// - Returns: The reconnected websocket or `self` when the socket is still connected.
+    public func reconnect() async throws -> WebSocket {
+        guard !isConnected else { return self }
+
+        let websocket = WebSocket(url: url, session: session)
+        try await websocket.connect()
+        return websocket
+    }
+
     /// Handle errors and cancel tasks when one occured.
     /// - Parameter error: The error that occured.
     private final func handleError(_ error: Error) {
