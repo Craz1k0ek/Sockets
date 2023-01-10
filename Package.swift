@@ -8,11 +8,13 @@ let package = Package(
     platforms: [.iOS(.v13)],
     products: [
         .library(name: "WebSockets", targets: ["WebSockets"]),
-        .library(name: "Bayeux", targets: ["Bayeux"])
+        .library(name: "Bayeux", targets: ["Bayeux"]),
+        .library(name: "Utility", targets: ["Utility"])
     ],
     targets: [
+        .target(name: "Utility"),
         .target(name: "WebSockets"),
-        .target(name: "Bayeux", dependencies: ["WebSockets"]),
+        .target(name: "Bayeux", dependencies: ["WebSockets", "Utility"]),
         .testTarget(name: "WebSocketsTests", dependencies: ["WebSockets"])
     ]
 )
