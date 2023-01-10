@@ -17,6 +17,9 @@ open class WebSocket: NSObject, ObservableObject {
     /// correctly release the delegate.
     private lazy var socketDelegate = WebSocket.Delegate(delegate: self)
 
+    /// An array of protocols to negotiate with the server.
+    private var protocols = [String]()
+
     private var messageContinuation: AsyncThrowingStream<URLSessionWebSocketTask.Message, Error>.Continuation?
     /// Messages received during the lifetime of the websocket.
     private(set) lazy var messages: AsyncThrowingStream<URLSessionWebSocketTask.Message, Error> = .init(URLSessionWebSocketTask.Message.self) { [weak self] continuation in
@@ -68,6 +71,7 @@ open class WebSocket: NSObject, ObservableObject {
         if let connectTask {
             return try await connectTask.value
         }
+        self.protocols = protocols
 
         let connectTask = Task {
             try await withCheckedThrowingContinuation { continuation in
@@ -149,7 +153,7 @@ open class WebSocket: NSObject, ObservableObject {
         guard !isConnected else { return self }
 
         let websocket = WebSocket(url: url, session: session)
-        try await websocket.connect()
+        try await websocket.connect(protocols: protocols)
         return websocket
     }
 
