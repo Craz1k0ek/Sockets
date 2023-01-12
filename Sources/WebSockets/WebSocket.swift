@@ -3,12 +3,13 @@ import Foundation
 open class WebSocket: NSObject, ObservableObject {
     /// The URL of the websocket.
     public let url: URL
-
     /// The session used to create the websocket task.
-    private let session: URLSession
+    public let session: URLSession
+
     /// The session used to create the websocket task.
     @available(iOS, deprecated: 15, message: "Set the URLSessionWebSocketTask.delegate instead of using a custom URLSession instance")
     private lazy var taskSession = URLSession(configuration: session.configuration, delegate: socketDelegate, delegateQueue: session.delegateQueue)
+
     /// The underlying websocket task.
     private var task: URLSessionWebSocketTask?
     /// The delegate wrapper of the socket.
@@ -22,7 +23,7 @@ open class WebSocket: NSObject, ObservableObject {
 
     private var messageContinuation: AsyncThrowingStream<URLSessionWebSocketTask.Message, Error>.Continuation?
     /// Messages received during the lifetime of the websocket.
-    private(set) lazy var messages: AsyncThrowingStream<URLSessionWebSocketTask.Message, Error> = .init(URLSessionWebSocketTask.Message.self) { [weak self] continuation in
+    private(set) public lazy var messages: AsyncThrowingStream<URLSessionWebSocketTask.Message, Error> = AsyncThrowingStream(URLSessionWebSocketTask.Message.self) { [weak self] continuation in
         self?.messageContinuation = continuation
     }
 
@@ -116,7 +117,7 @@ open class WebSocket: NSObject, ObservableObject {
 
     /// Receive websocket messages.
     private final func receive() {
-        task?.receive() { [weak self] response in
+        task?.receive { [weak self] response in
             switch response {
             case .success(let message):
                 self?.messageContinuation?.yield(message)
@@ -152,6 +153,11 @@ open class WebSocket: NSObject, ObservableObject {
     public func reconnect() async throws -> WebSocket {
         guard !isConnected else { return self }
 
+        if task == nil {
+            try await connect(protocols: protocols)
+            return self
+        }
+
         let websocket = WebSocket(url: url, session: session)
         try await websocket.connect(protocols: protocols)
         return websocket
@@ -179,6 +185,10 @@ extension WebSocket: URLSessionWebSocketDelegate {
         connectContinuation = nil
 
         objectWillChange.send()
+
+        if #unavailable(iOS 15) {
+            (self.session.delegate as? URLSessionWebSocketDelegate)?.urlSession?(session, webSocketTask: webSocketTask, didOpenWithProtocol: `protocol`)
+        }
     }
 
     public func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
@@ -189,6 +199,10 @@ extension WebSocket: URLSessionWebSocketDelegate {
         messageContinuation = nil
 
         objectWillChange.send()
+
+        if #unavailable(iOS 15) {
+            (self.session.delegate as? URLSessionWebSocketDelegate)?.urlSession?(session, webSocketTask: webSocketTask, didCloseWith: closeCode, reason: reason)
+        }
     }
 
     public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
@@ -208,5 +222,16 @@ extension WebSocket: URLSessionWebSocketDelegate {
         messageContinuation = nil
 
         self.task = nil
+
+        if #unavailable(iOS 15) {
+            (self.session.delegate as? URLSessionTaskDelegate)?.urlSession?(session, task: task, didCompleteWithError: error)
+        }
+    }
+
+    public func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        guard let delegate = session.delegate else {
+            return completionHandler(.performDefaultHandling, challenge.proposedCredential)
+        }
+        delegate.urlSession?(session, didReceive: challenge, completionHandler: completionHandler)
     }
 }

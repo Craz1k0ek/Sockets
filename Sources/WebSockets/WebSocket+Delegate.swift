@@ -28,5 +28,9 @@ extension WebSocket {
         func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
             delegate?.urlSession?(session, task: task, didCompleteWithError: error)
         }
+
+        func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+            delegate?.urlSession?(session, didReceive: challenge, completionHandler: completionHandler)
+        }
     }
 }
